@@ -10,7 +10,7 @@ COPY apps/docs/ ./apps/docs/
 
 RUN pnpm install --frozen-lockfile
 
-EXPOSE 3000
+EXPOSE 3055
 ENV PORT=3000
 
 RUN pnpm build:openapi
