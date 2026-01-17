@@ -71,5 +71,13 @@ pnpm install
 echo "✅ Dependencies installed successfully."
 echo ""
 
-echo "🔄 Running CLI..."
-docker compose -f $ROOT_DIR/docker-compose.dev.yml up -d --build
+echo "🔄 Starting Docker containers..."
+
+# Only build if --init flag passed or image doesn't exist
+if [ "$IS_INIT" -eq 1 ] || [ -z "$(docker images -q hyperion-docs-docs 2>/dev/null)" ]; then
+    echo "🔨 Building Docker image..."
+    docker compose -f $ROOT_DIR/docker-compose.dev.yml up -d --build
+else
+    echo "⚡ Using existing image (use --init to rebuild)"
+    docker compose -f $ROOT_DIR/docker-compose.dev.yml up -d
+fi
