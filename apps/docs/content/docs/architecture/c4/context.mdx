@@ -1,0 +1,45 @@
+---
+title: Level 1 - System Context
+description: High-level system context diagram
+---
+
+<Diagram lang="mermaid" chart="
+graph TD;
+classDef person fill:#08427B,color:#fff
+classDef system fill:#438DD5,color:#fff
+classDef external fill:#999999,color:#fff
+
+%% Users
+subgraph Users
+AM((Asset Manager)):::person
+AO((Asset Owner)):::person
+end
+
+%% Archon System
+Archon[Archon System]:::system
+
+%% External Systems
+subgraph External[External Systems]
+%% CRMS
+CRM[CRM Hubspot/Salesforce]:::external
+%%Market Data Integration (Inbound)
+BBG[Bloomberg]:::external
+Reuters[Reuters/Refinitiv]:::external
+%%Communication Integration (Outbound)
+Slack[Slack]:::external
+MSTeams[Microsoft Teams]:::external
+end
+
+%% User to Archon Relation
+AO -->|Views shared research| Archon
+AM -->|Uploads, searches<br/>& shares research| Archon
+
+%% Archon to External System Relation
+Archon <-->|Syncs contacts & deals| CRM
+
+BBG -->|Enriches with financials| Archon
+Reuters -->|Enriches with market data| Archon
+Archon -->|Sends notifications| Slack
+Archon -->|Sends notifications| MSTeams
+"
+/>
