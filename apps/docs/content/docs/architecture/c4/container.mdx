@@ -1,0 +1,85 @@
+---
+title: Level 2 - Container
+description: Container diagram showing Archon's major technical building blocks
+---
+
+## Overview
+
+The Container diagram shows the high-level shape of the software architecture and how responsibilities are distributed across it. 
+
+**Key:** At this level, we see Archon's internal structure — the services, databases, and messaging infrastructure that power the platform. External systems (CRM, Market Data, Communications) are shown in the [L1 Context diagram](./context).
+
+<Diagram lang="mermaid" chart="
+flowchart TB
+    %% Styling
+    classDef gateway fill:#1168BD,color:#fff,stroke:#0B4884
+    classDef service fill:#438DD5,color:#fff,stroke:#2E6295
+    classDef database fill:#438DD5,color:#fff,stroke:#2E6295
+    classDef queue fill:#85BBF0,color:#000,stroke:#5D99CF
+
+    %% System Boundary
+    subgraph Archon [Archon Platform]
+
+        %% Entry Point
+        GW[API Gateway<br/>Node.js / Express]:::gateway
+
+        %% Core Services Row
+        subgraph CoreServices [Core Services]
+            ING[Ingestion Service<br/>Node.js]:::service
+            PROC[Processing Service<br/>Node.js]:::service
+            SRCH[Search Service<br/>Node.js]:::service
+        end
+
+        %% Supporting Services Row
+        subgraph SupportServices [Supporting Services]
+            INTG[Integration Service<br/>Node.js]:::service
+            NOTIF[Notification Service<br/>Node.js]:::service
+            AUD[Audit Service<br/>Node.js]:::service
+        end
+
+        %% Message Queue
+        subgraph Messaging [Async Messaging]
+            RMQ[RabbitMQ<br/>Task Queue]:::queue
+            REDIS[Redis<br/>Cache / Pub-Sub]:::queue
+        end
+
+        %% Data Stores
+        subgraph DataStores [Data Stores]
+            PG[(PostgreSQL<br/>Users, Permissions, Audit)]:::database
+            MONGO[(MongoDB<br/>Document Metadata)]:::database
+            ES[(Elasticsearch<br/>Search Index)]:::database
+            S3[(S3<br/>Document Blobs)]:::database
+        end
+
+    end
+
+    %% Gateway Routes
+    GW -->|gRPC| ING
+    GW -->|gRPC| SRCH
+    GW -->|gRPC| INTG
+    GW -->|gRPC| AUD
+    GW <-->|session cache| REDIS
+
+    %% Ingestion Flow
+    ING -->|AMQP| RMQ
+    ING -->|S3 API| S3
+
+    %% Processing Pipeline
+    RMQ -->|AMQP| PROC
+    PROC -->|writes metadata| MONGO
+    PROC -->|HTTP| ES
+    PROC -->|S3 API| S3
+    PROC -->|publishes status| REDIS
+
+    %% Notifications
+    RMQ -.->|AMQP| NOTIF
+
+    %% Search
+    SRCH -->|HTTP| ES
+    SRCH -->|reads permissions| PG
+
+    %% Integration & Audit
+    INTG -->|reads credentials| PG
+    AUD -->|writes logs| PG
+"
+/>
