@@ -1,0 +1,64 @@
+---
+title: Level 3 - Ingestion Service
+description: Component diagram showing the internal structure of the Ingestion Service
+---
+
+## Overview
+
+The Ingestion Service receives documents from multiple sources and prepares them for the processing pipeline. This L3 diagram shows its internal components.
+
+<Diagram lang="mermaid" chart="
+flowchart TB
+    %% Styling
+    classDef component fill:#85BBF0,color:#000,stroke:#5D99CF
+    classDef external fill:#999999,color:#fff,stroke:#6B6B6B
+    classDef datastore fill:#438DD5,color:#fff,stroke:#2E6295
+
+    %% External Systems (at boundary)
+    EMAIL[Email Servers]:::external
+    API[API Gateway]:::external
+    VENDOR[Vendor APIs]:::external
+
+    %% Ingestion Service Boundary
+    subgraph Ingestion [Ingestion Service]
+
+        subgraph Connectors [Input Connectors]
+            EC[Email Connector]:::component
+            FH[File Upload Handler]:::component
+            VP[Vendor Feed Poller]:::component
+        end
+
+        DP[Document Parser]:::component
+        DE[Deduplication Engine]:::component
+
+    end
+
+    %% External Data Stores (at boundary)
+    S3[(S3)]:::datastore
+    RMQ[RabbitMQ]:::external
+
+    %% External to Connectors
+    EMAIL -->|IMAP / Graph API| EC
+    API -->|gRPC| FH
+    VENDOR -->|HTTP| VP
+
+    %% Connectors to Parser
+    EC --> DP
+    FH --> DP
+    VP --> DP
+
+    %% File Handler stores raw files
+    FH -->|S3 API| S3
+
+    %% Parser to Deduplication
+    DP --> DE
+
+    %% Deduplication outputs
+    DE -->|AMQP| RMQ
+"
+/>
+
+## Related Diagrams
+
+- **[L2: Container](./container)** — Ingestion Service in context with other services
+- **[L3: Processing Service](./component-processing)** — Next stage after ingestion
