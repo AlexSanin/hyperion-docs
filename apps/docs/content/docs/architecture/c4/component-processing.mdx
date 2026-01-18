@@ -1,0 +1,63 @@
+---
+title: Level 3 - Processing Service
+description: Component diagram showing the internal structure of the Processing Service
+---
+
+## Overview
+
+The Processing Service orchestrates the document processing pipeline. It consumes jobs from RabbitMQ and coordinates multiple processing stages before indexing the results.
+
+<Diagram lang="mermaid" chart="
+flowchart TB
+    %% Styling
+    classDef orchestrator fill:#1168BD,color:#fff,stroke:#0B4884
+    classDef worker fill:#85BBF0,color:#000,stroke:#5D99CF
+    classDef external fill:#999999,color:#fff,stroke:#6B6B6B
+    classDef datastore fill:#438DD5,color:#fff,stroke:#2E6295
+
+    %% External inputs
+    RMQ[RabbitMQ]:::external
+    S3[(S3)]:::datastore
+
+    %% Processing Service Boundary
+    subgraph Processing [Processing Service]
+
+        PO[Pipeline Orchestrator]:::orchestrator
+
+        subgraph Workers [Processing Workers]
+            FC[Format Converter<br/>LibreOffice / Pandoc]:::worker
+            OCR[OCR Worker<br/>Tesseract]:::worker
+            NER[NER Worker<br/>spaCy]:::worker
+            CLS[Classifier<br/>ML Model]:::worker
+            IDX[Indexer]:::worker
+        end
+
+    end
+
+    %% External outputs
+    MONGO[(MongoDB)]:::datastore
+    ES[(Elasticsearch)]:::datastore
+    REDIS[Redis]:::external
+
+    %% Input flow
+    RMQ -->|AMQP| PO
+    S3 -->|S3 API| PO
+
+    %% Orchestrator coordinates workers
+    PO --> FC
+    FC --> OCR
+    OCR --> NER
+    NER --> CLS
+    CLS --> IDX
+
+    %% Outputs
+    IDX -->|HTTP| ES
+    IDX --> MONGO
+    PO -->|publishes status| REDIS
+"
+/>
+
+## Related Diagrams
+
+- **[L2: Container](./container)** — Processing Service in context with other services
+- **[L3: Ingestion Service](./component-ingestion)** — Previous stage before processing

@@ -1,4 +1,4 @@
 {
 	"title": "C4 Diagrams",
-	"pages": ["context", "container","component-ingestion"]
+	"pages": ["context", "container", "component-ingestion", "component-processing"]
 }
