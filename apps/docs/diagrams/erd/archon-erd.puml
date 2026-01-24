@@ -1,0 +1,240 @@
+@startuml Archon ERD
+!theme plain
+skinparam linetype ortho
+
+title Archon Research Intelligence Platform - Entity Relationship Diagram
+
+' ============================================================================
+' CORE DOMAIN
+' ============================================================================
+package "Core" as Core {
+  entity Organization {
+    * id : UUID <<PK>>
+    --
+    * name : String
+    * type : Enum [manager|owner]
+    settings : JSONB
+    created_at : DateTime
+  }
+
+  entity User {
+    * id : UUID <<PK>>
+    --
+    * org_id : UUID <<FK>>
+    * email : String
+    * name : String
+    * role_id : UUID <<FK>>
+    created_at : DateTime
+  }
+
+  entity Role {
+    * id : UUID <<PK>>
+    --
+    * org_id : UUID <<FK>>
+    * name : String
+  }
+
+  entity Permission {
+    * id : UUID <<PK>>
+    --
+    * role_id : UUID <<FK>>
+    * resource : String
+    * action : String
+  }
+
+  Organization ||--o{ User : "has"
+  Organization ||--o{ Role : "defines"
+  Role ||--o{ Permission : "grants"
+  Role ||--o| User : "assigned to"
+}
+
+' ============================================================================
+' DOCUMENT DOMAIN
+' ============================================================================
+package "Document" as Doc {
+  entity Folder {
+    * id : UUID <<PK>>
+    --
+    * org_id : UUID <<FK>>
+    parent_id : UUID <<FK>>
+    * name : String
+    created_at : DateTime
+  }
+
+  entity Document {
+    * id : UUID <<PK>>
+    --
+    * org_id : UUID <<FK>>
+    * folder_id : UUID <<FK>>
+    * title : String
+    * source_type : Enum [email|upload|vendor]
+    * status : Enum [pending|processing|indexed|failed]
+    created_at : DateTime
+  }
+
+  entity DocumentVersion {
+    * id : UUID <<PK>>
+    --
+    * document_id : UUID <<FK>>
+    * version : Integer
+    * s3_path : String
+    extracted_text : Text
+    created_at : DateTime
+  }
+
+  entity Tag {
+    * id : UUID <<PK>>
+    --
+    * org_id : UUID <<FK>>
+    * name : String
+    color : String
+  }
+
+  entity DocumentTag {
+    * document_id : UUID <<PK>> <<FK>>
+    * tag_id : UUID <<PK>> <<FK>>
+    --
+    created_at : DateTime
+  }
+
+  Folder ||--o{ Folder : "contains"
+  Folder ||--o{ Document : "contains"
+  Document ||--o{ DocumentVersion : "has versions"
+  Document ||--o{ DocumentTag : "tagged with"
+  Tag ||--o{ DocumentTag : "applied to"
+}
+
+' ============================================================================
+' PROCESSING DOMAIN
+' ============================================================================
+package "Processing" as Proc {
+  entity ProcessingJob {
+    * id : UUID <<PK>>
+    --
+    * document_id : UUID <<FK>>
+    * status : Enum [queued|running|completed|failed]
+    started_at : DateTime
+    completed_at : DateTime
+  }
+
+  entity ProcessingStage {
+    * id : UUID <<PK>>
+    --
+    * job_id : UUID <<FK>>
+    * stage_name : Enum [convert|ocr|ner|classify|dedupe|index]
+    * status : Enum [pending|running|completed|failed]
+    output : JSONB
+    error : Text
+    started_at : DateTime
+    completed_at : DateTime
+  }
+
+  ProcessingJob ||--o{ ProcessingStage : "has stages"
+}
+
+' ============================================================================
+' INTEGRATION DOMAIN
+' ============================================================================
+package "Integration" as Integ {
+  entity Integration {
+    * id : UUID <<PK>>
+    --
+    * org_id : UUID <<FK>>
+    * type : Enum [crm|market_data|communication]
+    * provider : String
+    config : JSONB
+    enabled : Boolean
+    created_at : DateTime
+  }
+
+  entity IntegrationCredential {
+    * id : UUID <<PK>>
+    --
+    * integration_id : UUID <<FK>>
+    * encrypted_credentials : Text
+    expires_at : DateTime
+    refreshed_at : DateTime
+  }
+
+  entity SyncLog {
+    * id : UUID <<PK>>
+    --
+    * integration_id : UUID <<FK>>
+    * direction : Enum [inbound|outbound]
+    * status : Enum [success|failed]
+    records_synced : Integer
+    error : Text
+    timestamp : DateTime
+  }
+
+  Integration ||--o{ IntegrationCredential : "authenticated by"
+  Integration ||--o{ SyncLog : "logs"
+}
+
+' ============================================================================
+' SHARING DOMAIN
+' ============================================================================
+package "Sharing" as Share {
+  entity Share {
+    * id : UUID <<PK>>
+    --
+    * source_org_id : UUID <<FK>>
+    * target_org_id : UUID <<FK>>
+    * resource_type : Enum [folder|document|tag]
+    * resource_id : UUID
+    expires_at : DateTime
+    created_at : DateTime
+  }
+
+  entity SharePermission {
+    * id : UUID <<PK>>
+    --
+    * share_id : UUID <<FK>>
+    * permission : Enum [view|download|annotate]
+  }
+
+  Share ||--o{ SharePermission : "grants"
+}
+
+' ============================================================================
+' AUDIT DOMAIN
+' ============================================================================
+package "Audit" as Audit {
+  entity AuditLog {
+    * id : UUID <<PK>>
+    --
+    * org_id : UUID <<FK>>
+    * user_id : UUID <<FK>>
+    * action : String
+    * resource_type : String
+    * resource_id : UUID
+    details : JSONB
+    ip_address : String
+    timestamp : DateTime
+  }
+
+  entity RetentionPolicy {
+    * id : UUID <<PK>>
+    --
+    * org_id : UUID <<FK>>
+    * resource_type : String
+    * retention_days : Integer
+    legal_hold : Boolean
+    created_at : DateTime
+  }
+}
+
+' ============================================================================
+' CROSS-DOMAIN RELATIONSHIPS
+' ============================================================================
+Core.Organization ||--o{ Doc.Folder : "owns"
+Core.Organization ||--o{ Doc.Tag : "defines"
+Doc.Document ||--o{ Proc.ProcessingJob : "processed by"
+Core.Organization ||--o{ Integ.Integration : "configures"
+Core.Organization ||--o{ Share.Share : "shares from"
+Core.Organization ||--o{ Share.Share : "receives"
+Core.Organization ||--o{ Audit.AuditLog : "audited"
+Core.Organization ||--o{ Audit.RetentionPolicy : "governs"
+Core.User ||--o{ Audit.AuditLog : "performs"
+
+@enduml

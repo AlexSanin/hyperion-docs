@@ -1,5 +1,5 @@
 {
 	"title": "Archon Architecture",
 	"description": "An overview of the architecture of Archon, including its core components and design principles.",
-  "pages": ["index", "c4"]
+  "pages": ["index", "c4", "erd"]
 }
