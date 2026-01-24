@@ -1,0 +1,16 @@
+---
+title: Sequence Diagrams
+description: Detailed flow diagrams showing how data moves through the Archon platform for key operations.
+---
+
+# Sequence Diagrams
+
+Sequence diagrams show the **time-ordered flow** of messages between system components.
+
+## Available Flows
+
+| Flow | Description | Key Components |
+|------|-------------|----------------|
+| [Email Ingestion](/docs/seq/email-ingestion) | Auto-capture research from email | Ingestion → Parser → Processing Pipeline → Elasticsearch |
+| [File Upload](/docs/seq/file-upload) | User uploads document with processing | API → Virus Scan → S3 → Processing Pipeline → Elasticsearch |
+

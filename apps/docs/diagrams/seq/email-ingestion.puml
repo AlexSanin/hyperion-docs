@@ -1,0 +1,106 @@
+@startuml Email Ingestion Flow
+!theme plain
+
+title Email Ingestion Flow
+
+actor "Research Analyst" as User
+participant "Email Server\n(IMAP/Graph)" as Email
+participant "Ingestion\nService" as Ingestion
+participant "Parser" as Parser
+queue "RabbitMQ" as Queue
+participant "Processing\nService" as Processing
+participant "OCR\nWorker" as OCR
+participant "NER\nWorker" as NER
+participant "Classifier" as Classify
+participant "Deduplication" as Dedupe
+database "Elasticsearch" as ES
+database "S3" as S3
+participant "Notification\nService" as Notify
+participant "Slack" as Slack
+
+== Email Arrival ==
+
+User -> Email : Send email to\nresearch@tenant.archon.io
+note right of Email : Email with PDF attachment\narrives in tenant mailbox
+
+== Polling & Ingestion ==
+
+Ingestion -> Email : Poll for new emails\n(scheduled / webhook)
+activate Ingestion
+Email --> Ingestion : New email(s)
+
+Ingestion -> Parser : Parse email
+activate Parser
+Parser -> Parser : Extract metadata\n(sender, subject, date)
+Parser -> Parser : Extract attachments
+Parser --> Ingestion : Parsed email + attachments
+deactivate Parser
+
+Ingestion -> S3 : Store raw attachment
+S3 --> Ingestion : s3_path
+
+Ingestion -> Queue : Enqueue processing job
+Queue --> Ingestion : job_id
+deactivate Ingestion
+
+note over Queue : Async boundary\nClient doesn't wait
+
+== Document Processing Pipeline ==
+
+Queue -> Processing : Consume job
+activate Processing
+
+Processing -> Processing : Create ProcessingJob record\nstatus = "running"
+
+Processing -> OCR : Extract text
+activate OCR
+OCR -> OCR : Tesseract / Textract
+OCR --> Processing : extracted_text
+deactivate OCR
+
+Processing -> NER : Extract entities
+activate NER
+NER -> NER : spaCy + finance models
+NER --> Processing : entities (companies, tickers, people)
+deactivate NER
+
+Processing -> Classify : Categorize document
+activate Classify
+Classify -> Classify : ML classifier
+Classify --> Processing : category, tags
+deactivate Classify
+
+Processing -> Dedupe : Check for duplicates
+activate Dedupe
+Dedupe -> Dedupe : SHA-256 + SimHash
+
+alt Duplicate detected
+    Dedupe --> Processing : duplicate_of: doc_123
+    Processing -> Processing : Link to existing document
+    Processing -> Processing : Mark job completed\n(deduplicated)
+else Unique document
+    Dedupe --> Processing : unique
+    deactivate Dedupe
+
+    Processing -> ES : Index document
+    activate ES
+    ES --> Processing : indexed
+    deactivate ES
+
+    Processing -> Processing : Mark job completed\n(indexed)
+end
+
+deactivate Processing
+
+== Notification ==
+
+Processing -> Notify : Document ready event
+activate Notify
+Notify -> Slack : Post to #research channel
+Slack --> Notify : delivered
+Notify --> Processing : notified
+deactivate Notify
+
+note right of Slack : "New research from\njsmith@broker.com:\nQ4 Earnings Analysis"
+
+@enduml

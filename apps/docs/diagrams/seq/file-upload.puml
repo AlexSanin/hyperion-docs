@@ -1,0 +1,123 @@
+@startuml File Upload Flow
+!theme plain
+
+title File Upload with Processing
+
+actor "Research Analyst" as User
+participant "Web Client" as Client
+participant "API Gateway" as API
+participant "Ingestion\nService" as Ingestion
+participant "Virus\nScanner" as Virus
+database "S3" as S3
+database "MongoDB" as Mongo
+queue "RabbitMQ" as Queue
+participant "Processing\nService" as Processing
+participant "Format\nConverter" as Convert
+participant "OCR\nWorker" as OCR
+participant "NER\nWorker" as NER
+participant "Classifier" as Classify
+participant "Deduplication" as Dedupe
+database "Elasticsearch" as ES
+
+== Synchronous Upload Phase ==
+
+User -> Client : Select file(s) to upload
+Client -> API : POST /api/documents/upload\n[Authorization: Bearer token]
+activate API
+
+API -> API : Authenticate & authorize
+API -> Ingestion : Forward upload request
+activate Ingestion
+
+Ingestion -> Virus : Scan file
+activate Virus
+
+opt Virus detected
+    Virus --> Ingestion : INFECTED
+    Ingestion --> API : 400 Bad Request\n"Malware detected"
+    API --> Client : Upload rejected
+    Client --> User : Error: File contains malware
+end
+
+Virus --> Ingestion : CLEAN
+deactivate Virus
+
+Ingestion -> S3 : Store file\n(tenant-isolated bucket)
+S3 --> Ingestion : s3_path
+
+Ingestion -> Mongo : Create Document record\nstatus = "pending"
+Mongo --> Ingestion : document_id
+
+Ingestion -> Queue : Enqueue processing job
+Queue --> Ingestion : job_id
+
+Ingestion --> API : 202 Accepted\n{document_id, job_id}
+deactivate Ingestion
+
+API --> Client : Upload successful\nProcessing started
+deactivate API
+
+Client --> User : "Upload complete.\nProcessing in progress..."
+
+note over Queue : Async boundary\nResponse returned immediately\nProcessing continues in background
+
+== Asynchronous Processing Phase ==
+
+Queue -> Processing : Consume job
+activate Processing
+
+Processing -> Processing : Update ProcessingJob\nstatus = "running"
+
+Processing -> Convert : Convert to PDF
+activate Convert
+Convert -> Convert : LibreOffice / Pandoc
+Convert --> Processing : pdf_path
+deactivate Convert
+
+Processing -> OCR : Extract text
+activate OCR
+OCR -> OCR : Tesseract / Textract
+OCR --> Processing : extracted_text
+deactivate OCR
+
+Processing -> NER : Extract entities
+activate NER
+NER --> Processing : entities[]
+deactivate NER
+
+Processing -> Classify : Categorize
+activate Classify
+Classify --> Processing : category, tags[]
+deactivate Classify
+
+Processing -> Dedupe : Check duplicates
+activate Dedupe
+
+alt Duplicate found
+    Dedupe --> Processing : duplicate_of: doc_456
+    Processing -> Mongo : Update document\nstatus = "duplicate"\nlinked_to = doc_456
+    Processing -> Processing : Job completed (duplicate)
+else Near-duplicate found
+    Dedupe --> Processing : similar_to: [doc_789]\nconfidence: 0.85
+    Processing -> Mongo : Update document\nstatus = "review_needed"\nsimilar_docs = [doc_789]
+    Processing -> Processing : Job completed (needs review)
+else Unique
+    Dedupe --> Processing : unique
+    deactivate Dedupe
+
+    Processing -> ES : Index document
+    ES --> Processing : indexed
+
+    Processing -> Mongo : Update document\nstatus = "indexed"
+    Processing -> Processing : Job completed (success)
+end
+
+deactivate Processing
+
+== Status Polling (Optional) ==
+
+Client -> API : GET /api/jobs/{job_id}/status
+API --> Client : {status: "completed", document_id}
+Client --> User : "Document ready!"
+
+@enduml

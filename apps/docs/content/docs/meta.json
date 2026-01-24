@@ -8,6 +8,7 @@
     "---OpenAPI---",
     "openapi",
     "---Archon Architecture---",
-    "architecture"
+    "architecture",
+    "seq"
   ]
 }
