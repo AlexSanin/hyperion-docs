@@ -1,0 +1,219 @@
+---
+title: Solution Design
+description: User-Initiated Document Upload with Processing
+index: true
+---
+
+# File Upload with Document Processing
+
+We aim to build a secure, scalable file upload system that accepts user-submitted documents, scans for malware, and processes them through our document intelligence pipeline with real-time status tracking.
+
+## Purpose
+
+### High-Level Architecture
+
+<Diagram
+  lang="mermaid"
+  chart="
+graph TD;
+    subgraph Client [Client Layer]
+        WebApp[🌐 Web Client<br/>Upload UI with progress]
+    end
+
+    subgraph Gateway [API Layer]
+        API[🚪 API Gateway<br/>Auth, rate limiting, routing]
+    end
+
+    subgraph Archon [Archon Platform]
+        Ingestion[📥 Ingestion Service<br/>Upload handling & virus scan]
+        Queue[🐰 RabbitMQ<br/>Job queue]
+        Processing[⚙️ Processing Service<br/>OCR, NER, Classification]
+        Search[🔍 Elasticsearch<br/>Full-text search index]
+    end
+
+    subgraph Storage [Storage Layer]
+        S3[☁️ S3<br/>Document storage]
+        Mongo[🗄️ MongoDB<br/>Document metadata]
+    end
+
+    WebApp --> API
+    API --> Ingestion
+    Ingestion --> S3
+    Ingestion --> Mongo
+    Ingestion --> Queue
+    Queue --> Processing
+    Processing --> Search
+
+    classDef clientStyle fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#000
+    classDef gatewayStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
+    classDef archonStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
+    classDef storageStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
+
+    class WebApp clientStyle
+    class API gatewayStyle
+    class Ingestion,Queue,Processing,Search archonStyle
+    class S3,Mongo storageStyle
+
+" />
+
+### Upload Flow: Sync vs Async Phases
+
+The upload process is split into two phases for optimal user experience.
+
+<Diagram
+  lang="mermaid"
+  chart="
+graph LR;
+    subgraph Sync [Synchronous Phase < 2 sec]
+        Upload[📤 Upload] --> Scan[🛡️ Virus Scan]
+        Scan --> Store[💾 Store in S3]
+        Store --> Record[📝 Create Record]
+        Record --> Enqueue[📬 Enqueue Job]
+        Enqueue --> Response[✅ 202 Accepted]
+    end
+
+    subgraph Async [Asynchronous Phase 10-60 sec]
+        Convert[🔄 Convert] --> OCR[👁️ OCR]
+        OCR --> NER[🏷️ NER]
+        NER --> Classify[📊 Classify]
+        Classify --> Dedupe[🔍 Dedupe]
+        Dedupe --> Index[📇 Index]
+    end
+
+    Response -.-> Convert
+
+    classDef syncStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
+    classDef asyncStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
+
+    class Upload,Scan,Store,Record,Enqueue,Response syncStyle
+    class Convert,OCR,NER,Classify,Dedupe,Index asyncStyle
+
+" />
+
+### Ingestion Service: Upload Processing
+
+<Diagram
+  lang="mermaid"
+  chart="
+graph TD;
+    subgraph IngestionService [Ingestion Service]
+        subgraph Handlers [Request Handlers]
+            SingleUpload[Single File<br/>POST /documents]
+            BulkUpload[Bulk Upload<br/>POST /documents/bulk]
+        end
+
+        subgraph Security [Security Layer]
+            VirusScan[🛡️ ClamAV<br/>Malware detection]
+            Validation[✅ Validation<br/>Format & size checks]
+        end
+
+        subgraph Processing [Processing Layer]
+            Dedup[🔍 Deduplication<br/>Hash-based detection]
+        end
+    end
+
+    subgraph Storage [Storage Layer]
+        S3[☁️ S3<br/>Tenant-isolated buckets]
+        Mongo[🗄️ MongoDB<br/>Document metadata]
+    end
+
+    subgraph Queue [Message Queue]
+        RabbitMQ[🐰 RabbitMQ<br/>Processing jobs]
+    end
+
+    SingleUpload --> VirusScan
+    BulkUpload --> VirusScan
+    VirusScan --> Validation
+    Validation --> S3
+    Validation --> Dedup
+    Dedup --> Mongo
+    Dedup --> RabbitMQ
+
+    classDef handlerStyle fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#000
+    classDef securityStyle fill:#ffebee,stroke:#c62828,stroke-width:2px,color:#000
+    classDef processingStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
+    classDef storageStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
+
+    class SingleUpload,BulkUpload handlerStyle
+    class VirusScan,Validation securityStyle
+    class Dedup processingStyle
+    class S3,Mongo,RabbitMQ storageStyle
+
+" />
+
+### Sequence Flow
+
+For detailed message flow, see the [File Upload Sequence Diagram](/docs/seq/file-upload/flow).
+
+## Owners
+
+- **Product Owner**: TBD
+- **Team**: Platform Engineering
+- **Stakeholders**: Research Operations, Security, Compliance
+
+## Scope
+
+### In Scope
+
+- [x] Single file upload via REST API
+- [x] Bulk upload (multiple files in one request)
+- [x] Presigned URL support for direct-to-S3 upload
+- [x] Virus scanning with ClamAV
+- [x] Format validation (PDF, DOCX, XLSX, PPTX, TXT, HTML, images)
+- [x] Size limits (100MB per file, 1GB per bulk upload)
+- [x] Tenant-isolated S3 buckets
+- [x] Processing pipeline integration (OCR, NER, Classification)
+- [x] Job status polling endpoint
+- [x] Deduplication (exact and near-duplicate detection)
+
+### Out of Scope
+
+- [ ] Drag-and-drop UI (frontend concern)
+- [ ] Folder upload with structure preservation
+- [ ] Mobile-specific upload handling
+- [ ] Offline sync / resume interrupted uploads
+- [ ] Real-time processing progress (WebSocket)
+
+## Research
+
+**1. Virus Scanning Integration** — ClamAV provides open-source virus detection with daily signature updates. For enterprise scale, we can swap to commercial solutions (Sophos, CrowdStrike) via abstraction layer. Scanning adds ~500ms per file.
+
+**2. Direct-to-S3 Upload** — For large files (>10MB), presigned URLs allow clients to upload directly to S3, bypassing our API servers. This reduces load and enables resumable uploads. Trade-off: client needs S3 SDK or multipart upload handling.
+
+**3. Deduplication Timing** — Dedup can run pre-processing (reject early) or post-processing (after OCR has extracted text). Decision: Run hash-based dedup before processing, SimHash after text extraction for near-duplicate detection.
+
+**4. Bulk Upload Limits** — Testing showed 50 concurrent uploads per tenant is sustainable. Beyond that, queue depth grows faster than workers can process. Implement per-tenant rate limiting with configurable thresholds.
+
+**5. Format Detection** — Don't trust file extensions. Use libmagic / file signatures to detect actual format. Mismatch between extension and content triggers warning but doesn't block upload.
+
+## Risks & Solutions
+
+### Technical Risks
+
+| Risk                         | Impact                       | Mitigation                                                       |
+| ---------------------------- | ---------------------------- | ---------------------------------------------------------------- |
+| Virus scanner false positive | Medium — valid file rejected | Manual override with audit trail, admin approval flow            |
+| S3 upload timeout            | Medium — upload fails        | Presigned URLs with multipart, client-side retry                 |
+| Processing queue saturation  | High — backlog grows         | Auto-scaling workers, per-tenant quotas, alerting on queue depth |
+| OCR accuracy on poor scans   | Medium — garbled text        | Quality threshold, flag for manual review if confidence < 70%    |
+
+### Stability Concerns
+
+- [ ] ClamAV daemon must be running; implement health checks and fallback
+- [ ] S3 outage blocks all uploads; no local fallback (by design for compliance)
+- [ ] Large bulk uploads can starve other tenants; implement fair queuing
+
+### User Communication
+
+- [ ] Supported formats documentation
+- [ ] Size limits and error messages
+- [ ] Processing status UI component
+- [ ] Retry guidance for failed uploads
+
+## Additional Documents
+
+- [File Upload Sequence Diagram](/docs/seq/file-upload/flow)
+- [C4 Component: Ingestion Service](/docs/architecture/c4/component-ingestion)
+- [C4 Component: Processing Service](/docs/architecture/c4/component-processing)
+- [ERD: Document & Processing Entities](/docs/architecture/erd)
+- [ADR-006: Idempotency & Deduplication](/docs/adr/006-idempotency)

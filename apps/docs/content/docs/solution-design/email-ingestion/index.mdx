@@ -1,0 +1,171 @@
+---
+title: Solution Design
+description: Automatic Research Capture from Email
+index: true
+---
+
+# Email Ingestion for Research Capture
+
+We aim to build an automated system for capturing research documents from email, parsing attachments, and processing them through our document intelligence pipeline without manual user intervention.
+
+## Purpose
+
+### High-Level Architecture
+
+<Diagram
+  lang="mermaid"
+  chart="
+graph TD;
+    subgraph External [External Systems]
+        EmailServer[📧 Email Server<br/>IMAP / Microsoft Graph]
+    end
+
+    subgraph Archon [Archon Platform]
+        Ingestion[📥 Ingestion Service<br/>Email polling & parsing]
+        Queue[🐰 RabbitMQ<br/>Job queue]
+        Processing[⚙️ Processing Service<br/>OCR, NER, Classification]
+        Search[🔍 Elasticsearch<br/>Full-text search index]
+    end
+
+    subgraph Notifications [Notifications]
+        Notify[🔔 Notification Service]
+        Slack[💬 Slack]
+    end
+
+    EmailServer --> Ingestion
+    Ingestion --> Queue
+    Queue --> Processing
+    Processing --> Search
+    Processing --> Notify
+    Notify --> Slack
+
+    classDef externalStyle fill:#ffccbc,stroke:#e64a19,stroke-width:2px,color:#000
+    classDef archonStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
+    classDef notifyStyle fill:#c8e6c9,stroke:#388e3c,stroke-width:2px,color:#000
+
+    class EmailServer externalStyle
+    class Ingestion,Queue,Processing,Search archonStyle
+    class Notify,Slack notifyStyle
+
+" />
+
+### Ingestion Service Components
+
+The Ingestion Service handles email connectivity and initial document extraction.
+
+<Diagram
+  lang="mermaid"
+  chart="
+graph TD;
+    subgraph IngestionService [Ingestion Service]
+        subgraph Connectors [Protocol Connectors]
+            IMAP[IMAP Connector<br/>Standard email]
+            Graph[Graph API Connector<br/>Microsoft 365]
+        end
+
+        subgraph Processing [Processing Layer]
+            Parser[📄 Email Parser<br/>Metadata & attachment extraction]
+            Dedup[🔍 Deduplication<br/>Hash-based duplicate detection]
+        end
+    end
+
+    subgraph Storage [Storage Layer]
+        S3[☁️ S3<br/>Raw attachment storage]
+        Mongo[🗄️ MongoDB<br/>Document metadata]
+    end
+
+    subgraph Queue [Message Queue]
+        RabbitMQ[🐰 RabbitMQ<br/>Processing jobs]
+    end
+
+    IMAP --> Parser
+    Graph --> Parser
+    Parser --> Dedup
+    Parser --> S3
+    Dedup --> Mongo
+    Dedup --> RabbitMQ
+
+    classDef connectorStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
+    classDef processingStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
+    classDef storageStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
+
+    class IMAP,Graph connectorStyle
+    class Parser,Dedup processingStyle
+    class S3,Mongo,RabbitMQ storageStyle
+
+" />
+
+### Sequence Flow
+
+For detailed message flow, see the [Email Ingestion Sequence Diagram](/docs/seq/email-ingestion/flow).
+
+## Owners
+
+- **Product Owner**: TBD
+- **Team**: Platform Engineering
+- **Stakeholders**: Research Operations, Compliance
+
+## Scope
+
+### In Scope
+
+- [x] IMAP protocol support for standard email servers
+- [x] Microsoft Graph API support for Office 365
+- [ ] Google Workspace API support (Phase 2)
+- [x] Dedicated mailbox per tenant (`research@tenant.archon.io`)
+- [x] Attachment extraction (PDF, DOCX, XLSX, images)
+- [x] Email metadata extraction (sender, recipients, subject, date)
+- [x] Thread linking for conversation grouping
+- [x] Hash-based deduplication across threads
+- [x] Processing pipeline integration (OCR, NER, Classification)
+- [x] Slack notifications for new research
+
+### Out of Scope
+
+- [ ] Email sending / reply functionality
+- [ ] Calendar integration
+- [ ] Contact synchronization
+- [ ] Real-time push (polling only for MVP)
+- [ ] Attachment size > 100MB
+
+## Research
+
+**1. Email Protocol Selection** — We evaluated IMAP vs Microsoft Graph API. IMAP provides universal compatibility but lacks modern features. Graph API offers richer metadata and push notifications for O365 tenants. Decision: Support both, tenant-configurable.
+
+**2. Polling vs Push** — Graph API supports webhooks for real-time notifications, but IMAP requires polling. For MVP, we implement polling with configurable intervals (5min-1hr). Push support planned for Phase 2.
+
+**3. Attachment Handling** — Large attachments (>50MB) can timeout during processing. Solution: Stream directly to S3, process asynchronously. Implement size limits with clear user feedback.
+
+**4. Thread Detection** — Email threads are identified via `In-Reply-To` and `References` headers. We normalize thread IDs and link related documents for context.
+
+**5. Deduplication Strategy** — Same attachment may arrive in multiple threads (forwards, replies). SHA-256 hash on content prevents duplicate processing. SimHash catches near-duplicates (minor formatting changes).
+
+## Risks & Solutions
+
+### Technical Risks
+
+| Risk                       | Impact                     | Mitigation                                                          |
+| -------------------------- | -------------------------- | ------------------------------------------------------------------- |
+| OAuth token expiry         | High — ingestion stops     | Implement auto-refresh, monitor token TTL, alert 24hr before expiry |
+| Email provider rate limits | Medium — delayed ingestion | Implement exponential backoff, respect `Retry-After` headers        |
+| Large attachments timeout  | Medium — documents stuck   | Stream to S3 first, process async, implement timeout limits         |
+| Malformed emails           | Low — parsing errors       | Graceful degradation, log errors, skip unparseable with alert       |
+
+### Stability Concerns
+
+- [ ] If email provider is down, ingestion pauses (no data loss, resumes on recovery)
+- [ ] OAuth credential rotation requires tenant admin action
+- [ ] Polling intervals affect freshness vs API quota trade-off
+
+### User Communication
+
+- [ ] Tenant onboarding guide for mailbox setup
+- [ ] Email forwarding instructions for users
+- [ ] Processing status visibility in UI
+
+## Additional Documents
+
+- [Email Ingestion Sequence Diagram](/docs/seq/email-ingestion/flow)
+- [C4 Component: Ingestion Service](/docs/architecture/c4/component-ingestion)
+- [ERD: Document & Processing Entities](/docs/architecture/erd)
+- [Test Design: Email Ingestion](/docs/solution-design/email-ingestion/test-design)
